@@ -1,0 +1,219 @@
+from flask import Flask, render_template_string, request, jsonify, redirect, url_for, session
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(_name_)
+app.secret_key = 'your_secret_key'
+
+# Dummy dataset with disorder types
+data = {
+    'Gender': [0, 1, 0, 1, 0],
+    'Age': [45, 30, 50, 40, 35],
+    'Disorder_Type': [0, 1, 2, 3, 0],
+    'Time_Span': [10, 5, 20, 7, 15],
+    'Transmission_Probability': [0.85, 0.1, 0.9, 0.7, 0.2]
+}
+
+users_db = {}
+disorder_mapping = {'cystic fibrosis': 0, 'hemochromatosis': 1, 'tay-sachs': 2, 'sickle cell anemia': 3}
+df = pd.DataFrame(data)
+
+X = df[['Gender', 'Age', 'Disorder_Type', 'Time_Span']]
+y = df['Transmission_Probability']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+def predict_transmission_probability(gender, age, disorder, time_span):
+    disorder_type = disorder_mapping.get(disorder.strip().lower(), -1)
+    if disorder_type == -1:
+        return "Invalid disorder selected."
+    input_data = np.array([[gender, age, disorder_type, time_span]])
+    prediction = model.predict(input_data)
+    return prediction[0]
+
+css = '''
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, #e3f2fd, #90caf9);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        min-height: 100vh;
+        margin: 0;
+    }
+    .heading-container {
+        background: #bbdefb;
+        padding: 20px;
+        width: 90%;
+        max-width: 600px;
+        text-align: center;
+        border-radius: 12px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    .heading-container h1 {
+        font-size: 1.8rem;
+        font-style: italic;
+        color: #0d47a1;
+        margin: 0;
+    }
+    .container {
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        text-align: center;
+        width: 90%;
+        max-width: 600px;
+    }
+    h1 {
+        margin-bottom: 20px;
+        color: #1a237e;
+        font-size: 2rem;
+    }
+    form {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    input, select, button {
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-size: 1.1rem;
+    }
+    button {
+        background-color: #1976d2;
+        color: white;
+        border: none;
+        cursor: pointer;
+    }
+    button:hover {
+        background-color: #1565c0;
+    }
+    a {
+        text-decoration: none;
+        color: #1976d2;
+        margin-top: 15px;
+        font-size: 1.1rem;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+    p {
+        font-size: 1.2rem;
+        color: #333;
+    }
+</style>
+'''
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username in users_db:
+            return "User already exists!"
+        users_db[username] = generate_password_hash(password)
+        return redirect(url_for('signin'))
+    return render_template_string(css + '''
+    <div class="container">
+        <h1>Sign Up</h1>
+        <form method="post">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Sign Up</button>
+        </form>
+        <a href="/signin">Already have an account? Sign In</a>
+    </div>
+    ''')
+
+@app.route('/signin', methods=['GET', 'POST'])
+def signin():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if username in users_db and check_password_hash(users_db[username], password):
+            session['username'] = username
+            return redirect(url_for('index'))
+        return "Invalid username or password!"
+    return render_template_string(css + '''
+    <div class="heading-container">
+        <h1>Welcome to Genetic Transmission of Disease Prediction</h1>
+    </div>
+    <div class="container">
+        <h1>Sign In</h1>
+        <form method="post">
+            <input type="text" name="username" placeholder="Username" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Sign In</button>
+        </form>
+        <a href="/signup">Don't have an account? Sign Up</a>
+    </div>
+    ''')
+
+@app.route('/')
+def index():
+    if 'username' not in session:
+        return redirect(url_for('signin'))
+    return render_template_string(css + '''
+    <div class="container">
+        <h1>Welcome, {{ session['username'] }}!</h1>
+        <form action="/predict" method="post">
+            <select name="gender" required>
+                <option value="0">Male</option>
+                <option value="1">Female</option>
+            </select>
+            <input type="number" name="age" placeholder="Age" required>
+            <select name="disorder" required>
+                <option value="cystic fibrosis">Cystic Fibrosis</option>
+                <option value="hemochromatosis">Hemochromatosis</option>
+                <option value="tay-sachs">Tay-Sachs</option>
+                <option value="sickle cell anemia">Sickle Cell Anemia</option>
+            </select>
+            <input type="number" name="time_span" placeholder="Time Span (years)" required>
+            <button type="submit">Predict</button>
+        </form>
+        <a href="/logout">Logout</a>
+    </div>
+    ''')
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'username' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    gender = int(request.form['gender'])
+    age = int(request.form['age'])
+    disorder = request.form['disorder']
+    time_span = int(request.form['time_span'])
+    result = predict_transmission_probability(gender, age, disorder, time_span)
+    if isinstance(result, str):
+        return jsonify({'error': result}), 400
+    return render_template_string(css + '''
+    <div class="container">
+        <h1>Prediction Result</h1>
+        <p>Predicted Transmission Probability: {{ result }}</p>
+        <br><br>
+        <a href="https://ghr.nlm.nih.gov/primer/inheritance/inheritancepatterns" target="_blank">
+            <button style="background-color: #ff7043; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 1.1rem; cursor: pointer;">
+                Genetic Study
+            </button>
+        </a>
+        <br><br>
+        <a href="/">Go Back</a>
+    </div>
+    ''', result=round(result, 2))
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect(url_for('signin'))
+
+if _name_ == '_main_':
+    app.run(debug=True)
